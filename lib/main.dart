@@ -4,6 +4,14 @@ import 'dart:math' as math;
 import 'package:flutter/services.dart';
 import 'package:flutter_hooks/flutter_hooks.dart';
 import 'package:logger/logger.dart';
+
+
+enum SendMessageStatus{
+  sending,
+  failed,
+  sent
+}
+
 void main() {
   runApp(const CannonCastleApp());
 
@@ -31,42 +39,61 @@ class GameArea extends HookWidget {
 
   @override
   Widget build(BuildContext context) {
+    var powerMeterAnimCtrl = useAnimationController(duration: const Duration(milliseconds: 500));
+    var stopPosition = useState(0.0);
+    useEffect((){
+      powerMeterAnimCtrl..forward()..repeat(reverse: true);
+      return (){};
+    }, [powerMeterAnimCtrl]);
     return SafeArea(
       child: Scaffold(
         body: GestureDetector(
-          onTapUp: (details){
-            Logger().d("Click Coord ${details.globalPosition}");
+          onTap: (){
+            powerMeterAnimCtrl.stop();
+            stopPosition.value = powerMeterAnimCtrl.value;
+
+          },
+          onLongPress: (){
+            if(!powerMeterAnimCtrl.isAnimating){
+              powerMeterAnimCtrl..forward()..repeat(reverse: true);
+            }
           },
           child: Stack(
-            children: const [
-              BackgroundImage(),
-              LoveLetter(count: 1),
-              Align(
+            children:  [
+              const BackgroundImage(),
+              const LoveLetter(count: 1),
+
+              const Align(
                 alignment: Alignment.topRight,
                 child: LoveLetter(count: 3),
               ),
+
               Align(
                 alignment: Alignment.topCenter,
                 child: Padding(
-                  padding: EdgeInsets.only(top: 20.0),
-                  child: PowerMeter(),
+                  padding: const EdgeInsets.only(top: 20.0),
+                  child: AnimatedPowerMeter(width: MediaQuery.of(context).size.width / 2, animation: powerMeterAnimCtrl),
                 ),
               ),
-              Positioned(
+              const Positioned(
                 bottom: 100,
                 left: -100,
                 child: Castle1(),
               ),
-              Positioned(
+              const Positioned(
                 bottom: 100,
                 right: -100,
                 child: Castle2(),
               ),
-              Center(
+              const Center(
                 child: Pigeon(
                   flightDirection: FlightDirection.left,
                 ),
-              )
+              ),
+              Align(
+                alignment: FractionalOffset(0.5, 0.7),
+                child: Text(stopPosition.value.toString(), style: TextStyle(fontSize: 30, color: Colors.black, fontWeight: FontWeight.bold),),
+              ),
             ],
           ),
         ),
@@ -98,13 +125,18 @@ class Castle1 extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Transform(
-      alignment: Alignment.center,
-      transform: Matrix4.rotationY(math.pi),
-      child: SizedBox(
-        width: MediaQuery.of(context).size.width / 3,
-        child: Image.asset(
-          'assets/castle1.png',
+    return Container(
+      decoration: BoxDecoration(
+        border: Border.all()
+      ),
+      child: Transform(
+        alignment: Alignment.center,
+        transform: Matrix4.rotationY(math.pi),
+        child: SizedBox(
+          width: MediaQuery.of(context).size.width / 3,
+          child: Image.asset(
+            'assets/castle1.png',
+          ),
         ),
       ),
     );
@@ -158,13 +190,15 @@ class Pigeon extends StatelessWidget {
 /// The meter that displays a moving bar which determines the power of the
 /// shoot.
 class PowerMeter extends StatelessWidget {
-  const PowerMeter({Key? key}) : super(key: key);
+  final Animation<double> animation;
+  final double width;
+  const PowerMeter({Key? key, required this.animation, required this.width}) : super(key: key);
 
   @override
   Widget build(BuildContext context) {
     return SizedBox(
       height: 30.0,
-      width: MediaQuery.of(context).size.width / 2,
+      width: width,
       child: Stack(
         children: [
           Container(
@@ -197,13 +231,32 @@ class PowerMeter extends StatelessWidget {
               ),
             ),
           ),
-          const Center(
-            child: PowerMeterIndicator(),
-          ),
+          AnimatedBuilder(
+            animation: animation,
+            builder: (_, __) {
+              return Align(
+                alignment: FractionalOffset(animation.value, 0.5),
+                child: const PowerMeterIndicator(),
+              );
+            }
+          )
         ],
       ),
     );
   }
+}
+class AnimatedPowerMeter extends HookWidget{
+  final AnimationController animation;
+  final double width;
+  const AnimatedPowerMeter({Key? key, required this.width,  required this.animation}): super(key: key);
+
+
+  @override
+  Widget build(BuildContext context) {
+
+    return PowerMeter(animation: animation, width: width);
+  }
+
 }
 
 /// The red line in the [PowerMeter] that goes left to right and right to left.
