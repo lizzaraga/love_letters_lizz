@@ -39,23 +39,93 @@ class GameArea extends HookWidget {
 
   @override
   Widget build(BuildContext context) {
-    var powerMeterAnimCtrl = useAnimationController(duration: const Duration(milliseconds: 500));
-    var stopPosition = useState(0.0);
+    var powerMeterAnimCtrl = useAnimationController(duration: const Duration(milliseconds: 5000));
+    var powerMeterIsStopped = useState(false);
+    var powerMeterWidth = useMemoized(() => MediaQuery.of(context).size.width / 2);
+    // Flight movement controller
+    var flightMovAnimCtrl = useAnimationController(duration: const Duration(milliseconds: 3000));
+    var castleWidth = useMemoized(() => MediaQuery.of(context).size.width / 3);
+    var castleXOffset = useMemoized(() => 100.0);
+    var pigeonHeight = useMemoized(() => 50.0);
+    var flightDistance = useMemoized(() => MediaQuery.of(context).size.width - (castleWidth * 2) + castleXOffset * 2);
+    var flightDirection = useState<FlightDirection>(FlightDirection.left);
+
+    // Success interval bounds (lower and upper bounds)
+    // Todo: Make bounds configurables (feat)
+    var lowerBound = useMemoized(() => (90 * 0.5) / 100);
+    var upperBound = useMemoized(() => (110 * 0.5) / 100);
+
+    Animation<double> pigeonXAnimation = useMemoized((){
+      if(powerMeterIsStopped.value){
+        var startDistance = castleWidth - castleXOffset;
+        var endDistance = startDistance + flightDistance;
+        if(lowerBound <= powerMeterAnimCtrl.value && powerMeterAnimCtrl.value <= upperBound){
+          if(flightDirection.value == FlightDirection.right) {
+            return Tween<double>(begin: startDistance, end: endDistance).animate(flightMovAnimCtrl);
+          }
+          else {
+            return Tween<double>(begin: endDistance - pigeonHeight, end: startDistance - pigeonHeight).animate(flightMovAnimCtrl);
+          }
+        }
+        else{
+          if(flightDirection.value == FlightDirection.right) {
+            endDistance = (powerMeterAnimCtrl.value < lowerBound)
+                ? startDistance + (powerMeterAnimCtrl.value * flightDistance / lowerBound)
+                : startDistance + ((1 - powerMeterAnimCtrl.value) * flightDistance / lowerBound);
+            return Tween<double>(begin: startDistance, end: endDistance).animate(
+                CurvedAnimation(parent: flightMovAnimCtrl, curve: const Interval(0.7, 0.75))
+            );
+          }
+          else {
+            startDistance = flightDistance + castleWidth - castleXOffset - pigeonHeight;
+            endDistance = flightDistance - ((powerMeterAnimCtrl.value > upperBound)
+                ? ((1 - powerMeterAnimCtrl.value) * flightDistance / lowerBound)
+                : ((powerMeterAnimCtrl.value) * flightDistance / lowerBound));
+
+            return Tween<double>(begin: startDistance, end: endDistance).animate(
+                CurvedAnimation(parent: flightMovAnimCtrl, curve: const Interval(0.7, 0.75)));
+          }
+        }
+      }
+      return flightMovAnimCtrl;
+    }, [powerMeterIsStopped.value]);
+
+    Animation<double> pigeonYAnimation = useMemoized((){
+      if(powerMeterIsStopped.value){
+        var begin = (MediaQuery.of(context).size.height / 2) - pigeonHeight / 2;
+        var end = MediaQuery.of(context).size.height;
+        if(lowerBound <= powerMeterAnimCtrl.value && powerMeterAnimCtrl.value <= upperBound){
+          return Tween(begin: begin, end: begin).animate(flightMovAnimCtrl);
+        }
+        Logger().d("Outside bounds");
+        return Tween(begin: begin, end: end).animate(CurvedAnimation(parent: flightMovAnimCtrl, curve: const Interval(0.75, 1)));
+      }
+      return flightMovAnimCtrl;
+    }, [powerMeterIsStopped.value]);
+
     useEffect((){
-      powerMeterAnimCtrl..forward()..repeat(reverse: true);
-      return (){};
-    }, [powerMeterAnimCtrl]);
+     if(powerMeterIsStopped.value){
+       powerMeterAnimCtrl.stop();
+       flightMovAnimCtrl.forward();
+     }else{
+       flightMovAnimCtrl.reset();
+       powerMeterAnimCtrl..forward()..repeat(reverse: true);
+     }
+     return null;
+    }, [powerMeterIsStopped.value]);
+
+
+
+
     return SafeArea(
       child: Scaffold(
         body: GestureDetector(
           onTap: (){
-            powerMeterAnimCtrl.stop();
-            stopPosition.value = powerMeterAnimCtrl.value;
-
+            powerMeterIsStopped.value = true;
           },
           onLongPress: (){
             if(!powerMeterAnimCtrl.isAnimating){
-              powerMeterAnimCtrl..forward()..repeat(reverse: true);
+              powerMeterIsStopped.value = false;
             }
           },
           child: Stack(
@@ -72,27 +142,38 @@ class GameArea extends HookWidget {
                 alignment: Alignment.topCenter,
                 child: Padding(
                   padding: const EdgeInsets.only(top: 20.0),
-                  child: AnimatedPowerMeter(width: MediaQuery.of(context).size.width / 2, animation: powerMeterAnimCtrl),
+                  child: AnimatedPowerMeter(width: powerMeterWidth, animation: powerMeterAnimCtrl),
                 ),
               ),
-              const Positioned(
+              Positioned(
                 bottom: 100,
-                left: -100,
-                child: Castle1(),
+                left: - castleXOffset,
+                child: Castle1(castleWidth: castleWidth),
               ),
-              const Positioned(
+              Positioned(
                 bottom: 100,
-                right: -100,
-                child: Castle2(),
+                right: - castleXOffset,
+                child: Castle2(castleWidth: castleWidth),
               ),
-              const Center(
-                child: Pigeon(
-                  flightDirection: FlightDirection.left,
+              AnimatedBuilder(
+                animation: flightMovAnimCtrl,
+                child: Center(
+                  child: Pigeon(
+                    pigeonHeight: pigeonHeight,
+                    flightDirection: flightDirection.value,
+                  ),
                 ),
+                builder: (_, child){
+                  return Positioned(
+                    left: pigeonXAnimation.value,
+                    top: pigeonYAnimation.value,
+                    child: child!
+                  );
+                },
               ),
               Align(
-                alignment: FractionalOffset(0.5, 0.7),
-                child: Text(stopPosition.value.toString(), style: TextStyle(fontSize: 30, color: Colors.black, fontWeight: FontWeight.bold),),
+                alignment: const FractionalOffset(0.5, 0.7),
+                child: Text(powerMeterIsStopped.value.toString(), style: const TextStyle(fontSize: 30, color: Colors.black, fontWeight: FontWeight.bold),),
               ),
             ],
           ),
@@ -121,7 +202,8 @@ class BackgroundImage extends StatelessWidget {
 
 /// The castle on the left.
 class Castle1 extends StatelessWidget {
-  const Castle1({Key? key}) : super(key: key);
+  final double castleWidth;
+  const Castle1({Key? key, required this.castleWidth}) : super(key: key);
 
   @override
   Widget build(BuildContext context) {
@@ -133,7 +215,7 @@ class Castle1 extends StatelessWidget {
         alignment: Alignment.center,
         transform: Matrix4.rotationY(math.pi),
         child: SizedBox(
-          width: MediaQuery.of(context).size.width / 3,
+          width: castleWidth,
           child: Image.asset(
             'assets/castle1.png',
           ),
@@ -145,14 +227,20 @@ class Castle1 extends StatelessWidget {
 
 /// The castle on the right.
 class Castle2 extends StatelessWidget {
-  const Castle2({Key? key}) : super(key: key);
+  final double castleWidth;
+  const Castle2({Key? key, required this.castleWidth}) : super(key: key);
 
   @override
   Widget build(BuildContext context) {
-    return SizedBox(
-      width: MediaQuery.of(context).size.width / 3,
-      child: Image.asset(
-        'assets/castle2.png',
+    return Container(
+      decoration: BoxDecoration(
+          border: Border.all()
+      ),
+      child: SizedBox(
+        width: castleWidth,
+        child: Image.asset(
+          'assets/castle2.png',
+        ),
       ),
     );
   }
@@ -165,8 +253,10 @@ enum FlightDirection {
 
 /// The cannon ball that we will shoot.
 class Pigeon extends StatelessWidget {
+  final double pigeonHeight;
   const Pigeon({
     Key? key,
+    required this.pigeonHeight,
     required this.flightDirection,
   }) : super(key: key);
 
@@ -180,7 +270,7 @@ class Pigeon extends StatelessWidget {
           ? Matrix4.identity()
           : Matrix4.rotationY(math.pi),
       child: SizedBox(
-        height: 50,
+        height: pigeonHeight,
         child: Image.asset('assets/carrier_pigeon.png'),
       ),
     );
