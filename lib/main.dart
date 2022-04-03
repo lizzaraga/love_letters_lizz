@@ -4,10 +4,11 @@ import 'dart:math' as math;
 import 'package:flutter/services.dart';
 import 'package:flutter_hooks/flutter_hooks.dart';
 import 'package:logger/logger.dart';
+import 'package:love_letters/winner_screen.dart';
 
 
-enum SendMessageStatus{
-  sending,
+enum SendingLetterStatus{
+  waiting,
   failed,
   sent
 }
@@ -28,6 +29,7 @@ class CannonCastleApp extends StatelessWidget {
       DeviceOrientation.landscapeRight,
     ]);
     return const MaterialApp(
+      debugShowCheckedModeBanner: false,
       home: GameArea(),
     );
   }
@@ -35,59 +37,83 @@ class CannonCastleApp extends StatelessWidget {
 
 /// The game area with all the components.
 class GameArea extends HookWidget {
+  final powerMeterLowerBound = 90;
+  final powerMeterUpperBound = 110;
+  final maxPointsToFinish = 5;
   const GameArea({Key? key}) : super(key: key);
 
   @override
   Widget build(BuildContext context) {
+    // Not rebuild the view
+    var sendingLetterStatus = useRef(SendingLetterStatus.waiting);
+
     var powerMeterAnimCtrl = useAnimationController(duration: const Duration(milliseconds: 5000));
     var powerMeterIsStopped = useState(false);
     var powerMeterWidth = useMemoized(() => MediaQuery.of(context).size.width / 2);
     // Flight movement controller
-    var flightMovAnimCtrl = useAnimationController(duration: const Duration(milliseconds: 3000));
+    var flightMovAnimCtrl = useAnimationController(duration: const Duration(milliseconds: 2000));
     var castleWidth = useMemoized(() => MediaQuery.of(context).size.width / 3);
     var castleXOffset = useMemoized(() => 100.0);
     var pigeonHeight = useMemoized(() => 50.0);
     var flightDistance = useMemoized(() => MediaQuery.of(context).size.width - (castleWidth * 2) + castleXOffset * 2);
-    var flightDirection = useState<FlightDirection>(FlightDirection.left);
+    var flightDirection = useState<FlightDirection>(FlightDirection.right);
 
     // Success interval bounds (lower and upper bounds)
     // Todo: Make bounds configurables (feat)
-    var lowerBound = useMemoized(() => (90 * 0.5) / 100);
-    var upperBound = useMemoized(() => (110 * 0.5) / 100);
 
+    var lowerBound = useMemoized(() => (powerMeterLowerBound * 0.5) / 100);
+    var upperBound = useMemoized(() => (powerMeterUpperBound * 0.5) / 100);
+
+    // Letter future status
+    // Player points
+    var firstPlayerPoints = useState(0);
+    var secondPlayerPoints = useState(0);
+    var maxPoints = useMemoized(() => math.max(firstPlayerPoints.value, secondPlayerPoints.value), [
+      firstPlayerPoints.value,
+      secondPlayerPoints.value
+    ]);
     Animation<double> pigeonXAnimation = useMemoized((){
       if(powerMeterIsStopped.value){
-        var startDistance = castleWidth - castleXOffset;
-        var endDistance = startDistance + flightDistance;
+        var startDistance = castleWidth - castleXOffset - pigeonHeight;
+        var endDistance = startDistance + flightDistance + pigeonHeight;
         if(lowerBound <= powerMeterAnimCtrl.value && powerMeterAnimCtrl.value <= upperBound){
+          // Letter will be send successfully in this case
+          sendingLetterStatus.value = SendingLetterStatus.sent;
           if(flightDirection.value == FlightDirection.right) {
             return Tween<double>(begin: startDistance, end: endDistance).animate(flightMovAnimCtrl);
           }
           else {
-            return Tween<double>(begin: endDistance - pigeonHeight, end: startDistance - pigeonHeight).animate(flightMovAnimCtrl);
+            return Tween<double>(begin: endDistance - pigeonHeight, end: startDistance).animate(flightMovAnimCtrl);
           }
         }
         else{
+          // Letter won't be send  in this case
+          sendingLetterStatus.value = SendingLetterStatus.failed;
           if(flightDirection.value == FlightDirection.right) {
             endDistance = (powerMeterAnimCtrl.value < lowerBound)
                 ? startDistance + (powerMeterAnimCtrl.value * flightDistance / lowerBound)
                 : startDistance + ((1 - powerMeterAnimCtrl.value) * flightDistance / lowerBound);
             return Tween<double>(begin: startDistance, end: endDistance).animate(
-                CurvedAnimation(parent: flightMovAnimCtrl, curve: const Interval(0.7, 0.75))
+                CurvedAnimation(parent: flightMovAnimCtrl, curve: const Interval(0.0, 0.75))
             );
           }
           else {
-            startDistance = flightDistance + castleWidth - castleXOffset - pigeonHeight;
+            startDistance = flightDistance + castleWidth - castleXOffset;
             endDistance = flightDistance - ((powerMeterAnimCtrl.value > upperBound)
                 ? ((1 - powerMeterAnimCtrl.value) * flightDistance / lowerBound)
                 : ((powerMeterAnimCtrl.value) * flightDistance / lowerBound));
 
             return Tween<double>(begin: startDistance, end: endDistance).animate(
-                CurvedAnimation(parent: flightMovAnimCtrl, curve: const Interval(0.7, 0.75)));
+                CurvedAnimation(parent: flightMovAnimCtrl, curve: const Interval(0.0, 0.75)));
           }
         }
       }
-      return flightMovAnimCtrl;
+      double defaultX = flightDirection.value == FlightDirection.right
+      ? castleWidth - castleXOffset - pigeonHeight
+      : flightDistance + (castleWidth - castleXOffset);
+
+      return Tween<double>(begin: defaultX ,end: defaultX ).animate(flightMovAnimCtrl);
+      //return flightMovAnimCtrl;
     }, [powerMeterIsStopped.value]);
 
     Animation<double> pigeonYAnimation = useMemoized((){
@@ -100,8 +126,12 @@ class GameArea extends HookWidget {
         Logger().d("Outside bounds");
         return Tween(begin: begin, end: end).animate(CurvedAnimation(parent: flightMovAnimCtrl, curve: const Interval(0.75, 1)));
       }
-      return flightMovAnimCtrl;
+
+      var defaultY = (MediaQuery.of(context).size.height / 2) - pigeonHeight / 2;
+      return Tween<double>(begin: defaultY, end: defaultY).animate(flightMovAnimCtrl);
+      //return flightMovAnimCtrl;
     }, [powerMeterIsStopped.value]);
+
 
     useEffect((){
      if(powerMeterIsStopped.value){
@@ -109,12 +139,44 @@ class GameArea extends HookWidget {
        flightMovAnimCtrl.forward();
      }else{
        flightMovAnimCtrl.reset();
+       sendingLetterStatus.value = SendingLetterStatus.waiting;
        powerMeterAnimCtrl..forward()..repeat(reverse: true);
      }
      return null;
     }, [powerMeterIsStopped.value]);
 
+    useEffect((){
+      void _handleStatus (AnimationStatus status){
+        if(status == AnimationStatus.completed){
+          if(flightDirection.value == FlightDirection.right){
+            if(sendingLetterStatus.value == SendingLetterStatus.sent) {
+              firstPlayerPoints.value ++;
+            }
+            flightDirection.value = FlightDirection.left;
+          }
+          else{
+            if(sendingLetterStatus.value == SendingLetterStatus.sent) {
+              secondPlayerPoints.value ++;
+            }
+            flightDirection.value = FlightDirection.right;
+          }
+          powerMeterIsStopped.value = false;
+        }
+      }
+      flightMovAnimCtrl.addStatusListener(_handleStatus);
+      return () => flightMovAnimCtrl.removeStatusListener(_handleStatus);
+    }, [flightMovAnimCtrl]);
 
+    useEffect((){
+      if(maxPoints == maxPointsToFinish){
+        int winner = firstPlayerPoints.value > secondPlayerPoints.value ? 1 : 2;
+        // Send to micro tasks loop
+        Future.delayed(Duration.zero, () => Navigator.of(context).pushReplacement(MaterialPageRoute(builder: (_) =>  WinnerScreen(winnerNo: winner,))));
+      }
+      return null;
+    }, [maxPoints]);
+    // Check if app rebuilds uselessly (you can uncomment and see it in console)
+    // Logger().d("Rebuild");
 
 
     return SafeArea(
@@ -123,19 +185,18 @@ class GameArea extends HookWidget {
           onTap: (){
             powerMeterIsStopped.value = true;
           },
-          onLongPress: (){
-            if(!powerMeterAnimCtrl.isAnimating){
-              powerMeterIsStopped.value = false;
-            }
-          },
+
           child: Stack(
             children:  [
               const BackgroundImage(),
-              const LoveLetter(count: 1),
+              Positioned(left: 14, child: LoveLetter(count: firstPlayerPoints.value)),
 
-              const Align(
-                alignment: Alignment.topRight,
-                child: LoveLetter(count: 3),
+              Positioned(
+                right: 14,
+                child: Align(
+                  alignment: Alignment.topRight,
+                  child: LoveLetter(count: secondPlayerPoints.value),
+                ),
               ),
 
               Align(
@@ -171,10 +232,10 @@ class GameArea extends HookWidget {
                   );
                 },
               ),
-              Align(
+             /* Align(
                 alignment: const FractionalOffset(0.5, 0.7),
-                child: Text(powerMeterIsStopped.value.toString(), style: const TextStyle(fontSize: 30, color: Colors.black, fontWeight: FontWeight.bold),),
-              ),
+                child: Text("Power Meter Stop: ${powerMeterIsStopped.value}", style: const TextStyle(fontSize: 24, color: Colors.black, fontWeight: FontWeight.bold),),
+              ),*/
             ],
           ),
         ),
@@ -209,7 +270,7 @@ class Castle1 extends StatelessWidget {
   Widget build(BuildContext context) {
     return Container(
       decoration: BoxDecoration(
-        border: Border.all()
+        //border: Border.all()
       ),
       child: Transform(
         alignment: Alignment.center,
@@ -234,7 +295,7 @@ class Castle2 extends StatelessWidget {
   Widget build(BuildContext context) {
     return Container(
       decoration: BoxDecoration(
-          border: Border.all()
+          //border: Border.all()
       ),
       child: SizedBox(
         width: castleWidth,
