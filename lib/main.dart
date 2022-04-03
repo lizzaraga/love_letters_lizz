@@ -51,7 +51,7 @@ class GameArea extends HookWidget {
     var powerMeterIsStopped = useState(false);
     var powerMeterWidth = useMemoized(() => MediaQuery.of(context).size.width / 2);
     // Flight movement controller
-    var flightMovAnimCtrl = useAnimationController(duration: const Duration(milliseconds: 2000));
+    var flightMovAnimCtrl = useAnimationController(duration: const Duration(milliseconds: 1000));
     var castleWidth = useMemoized(() => MediaQuery.of(context).size.width / 3);
     var castleXOffset = useMemoized(() => 100.0);
     var pigeonHeight = useMemoized(() => 50.0);
@@ -123,7 +123,7 @@ class GameArea extends HookWidget {
         if(lowerBound <= powerMeterAnimCtrl.value && powerMeterAnimCtrl.value <= upperBound){
           return Tween(begin: begin, end: begin).animate(flightMovAnimCtrl);
         }
-        Logger().d("Outside bounds");
+        //Logger().d("Outside bounds");
         return Tween(begin: begin, end: end).animate(CurvedAnimation(parent: flightMovAnimCtrl, curve: const Interval(0.75, 1)));
       }
 
